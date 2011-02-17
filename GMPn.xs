@@ -170,7 +170,7 @@ CODE:
         for (i = 0; i < rl; i++) {
             char c = pv[i];
             if (c < 10) pv[i] = c + '0';
-            else pv[i] = c + 'a';
+            else pv[i] = c + 'a' - 10;
         }
     }
 OUTPUT:
@@ -189,7 +189,6 @@ PREINIT:
     mp_size_t rn;
     unsigned char *spv;
 CODE:
-    SvPOK_on(r);
     extract(r);
     if (ix)
         s = sv_2mortal(newSVsv(s));
@@ -201,9 +200,9 @@ CODE:
             if ((c >= '0') && (c <= '9'))
                 spv[i] = c - '0';
             else if ((c >= 'a') && (c <= 'z'))
-                spv[i] = c - 'a';
+                spv[i] = c - 'a' + 10;
             else if ((c >= 'A') && (c <= 'Z'))
-                spv[i] = c - 'A';
+                spv[i] = c - 'A' + 10;
             else
                 Perl_croak(aTHX_ "bad digit, ascii code: %d", c);
         }
@@ -218,5 +217,6 @@ CODE:
     if (rl1 > rl)
         rp = (mp_limb_t*) sv_grow(r, rl1);
     rn = mpn_set_str(rp, spv, sl, base);
+    SvPOK_on(r);
     SvCUR_set(r, rn * sizeof(mp_limb_t));
 
