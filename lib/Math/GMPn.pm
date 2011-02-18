@@ -11,12 +11,16 @@ our @EXPORT_OK = qw( mpn_add
 		     mpn_sub
 		     mpn_mul
 		     mpn_sqr
-		     mpn_mul_ext
+		     mpn_emul
+                     mpn_esqr
+                     mpn_divrem
 
 		     mpn_get_str
 		     mpn_get_strp
 		     mpn_set_str
 		     mpn_set_strp
+
+                     mpn_set_bitlen
 		  );
 our @EXPORT = @EXPORT_OK; # remove me!
 
