@@ -16,9 +16,9 @@ our @EXPORT_OK = qw( mpn_add
                      mpn_divrem
 
 		     mpn_get_str
-		     mpn_get_strp
+		     mpn_get_str0
 		     mpn_set_str
-		     mpn_set_strp
+		     mpn_set_str0
 
                      mpn_set_bitlen
 		  );
@@ -34,24 +34,51 @@ __END__
 
 =head1 NAME
 
-Math::GMPn - Perl extension for blah blah blah
+Math::GMPn - Fixed length integer arithmetic.
 
 =head1 SYNOPSIS
 
   use Math::GMPn;
-  blah blah blah
+
+  # 128bits;
+  mpn_set_str($a, "123450000000000", 10, 128);
+  mpn_set_str($b, "100000000000001", 10, 128);
+  mpn_set_str($c, "1f1f1f1f1f1f1f1", 16, 128); # hexadecimal
+  mpn_set_num($d, 23 * 234);
+
+  mpn_mul($r1, $a, $b);
+  mpn_add($r2, $r1, $c);
+  mpn_div($r3, $r4, $r2, $d);
+
+  say mpn_get_str($r4);
 
 =head1 DESCRIPTION
 
-Stub documentation for Math::GMPn, created by h2xs. It looks like the
-author of the extension was negligent enough to leave the stub
-unedited.
+This module provides a set of functions to perform arithmetic on fixed
+length but arbitrarily large bit strings implemented on top of the GMP
+library.
 
-Blah blah blah.
+The bit length of the strings passed to the module must be a
+multiple of the native machine integer size (i.e. 32 or 64 bits). Most
+operations do not check that condition and results are unspecified
+when other sizes are used.
+
+When strings of different length are used on the same operation, the
+result lenght is equal to that of the largest input. For instance,
+adding a 128bit string and a 256bit string will output a 256bit
+string.
+
+
+
 
 =head2 EXPORT
 
-None by default.
+=over 4
+
+=item mpn_set_str($to, $str, $base, $bitlen)
+
+
+=back
 
 
 
