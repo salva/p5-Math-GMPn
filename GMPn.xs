@@ -56,8 +56,14 @@ my_set_bitlen(pTHX_ SV *sv, int bitlen, int sign_extend) {
     SvCUR_set(sv, len);
 }
 
-static mp_limb_t *prepare_result(pTHX_ SV *sv, STRLEN l) {
+static void
+check_output(pTHX_ SV *sv) {
+    if (SvTHINKFIRST(sv)) Perl_croak(aTHX_ "read only scalar used as output argument");
+}
+
+static mp_limb_t *prepare_output(pTHX_ SV *sv, STRLEN l) {
     mp_limb_t *r;
+    check_output(aTHX_ sv);
     SvUPGRADE(sv, SVt_PV);
     r = (mp_limb_t*)SvGROW(sv, l);
     SvCUR_set(sv, l);
@@ -65,10 +71,9 @@ static mp_limb_t *prepare_result(pTHX_ SV *sv, STRLEN l) {
     return r;
 }
 
-
 #define EXTRACT(sv) ((sv ## p = (mp_limb_t*)SvPV_nolen(sv)), (sv ## l = SvCUR(sv)))
-#define RESULT(sv, len) (sv ## p = prepare_result(aTHX_ sv, (len)))
-#define n(sv) (sv ## l / sizeof(mp_limb_t))
+#define OUTPUT(sv, len) (sv ## p = prepare_output(aTHX_ sv, (len)))
+#define N(sv) (sv ## l / sizeof(mp_limb_t))
 
 MODULE = Math::GMPn		PACKAGE = Math::GMPn		
 
@@ -91,12 +96,12 @@ CODE:
     EXTRACT(s1);
     EXTRACT(s2);
     if (s1l < s2l) {
-        RESULT(r, s2l);
-        mpn_add(rp, s2p, n(s2), s1p, n(s1));
+        OUTPUT(r, s2l);
+        mpn_add(rp, s2p, N(s2), s1p, N(s1));
     }
     else {
-        RESULT(r, s1l);
-        mpn_add(rp, s1p, n(s1), s2p, n(s2));
+        OUTPUT(r, s1l);
+        mpn_add(rp, s1p, N(s1), s2p, N(s2));
     }
 
 void
@@ -111,13 +116,13 @@ CODE:
     EXTRACT(s1);
     EXTRACT(s2);
     if (s1l < s2l) {
-        RESULT(r, s1l);
-        mpn_sub(rp, s2p, n(s2), s1p, n(s1));
-        mpn_neg_n(rp, rp, n(s2));
+        OUTPUT(r, s1l);
+        mpn_sub(rp, s2p, N(s2), s1p, N(s1));
+        mpn_neg_n(rp, rp, N(s2));
     }
     else {
-        RESULT(r, s2l);
-        mpn_sub(rp, s1p, n(s1), s2p, n(s2));
+        OUTPUT(r, s2l);
+        mpn_sub(rp, s1p, N(s1), s2p, N(s2));
     }
 
 void
@@ -131,11 +136,11 @@ PREINIT:
 CODE:
     EXTRACT(s1);
     EXTRACT(s2);
-    RESULT(r, s1l + s2l);
+    OUTPUT(r, s1l + s2l);
     if (s1l < s2l)
-        mpn_mul(rp, s2p, n(s2), s1p, n(s1));
+        mpn_mul(rp, s2p, N(s2), s1p, N(s1));
     else 
-        mpn_mul(rp, s1p, n(s1), s2p, n(s2));
+        mpn_mul(rp, s1p, N(s1), s2p, N(s2));
 
 void
 mpn_mul(r, s1, s2)
@@ -149,12 +154,12 @@ CODE:
     EXTRACT(s1);
     EXTRACT(s2);
     if (s1l < s2l) {
-        RESULT(r, s2l);
-        my_mul(rp, s2p, n(s2), s1p, n(s1));
+        OUTPUT(r, s2l);
+        my_mul(rp, s2p, N(s2), s1p, N(s1));
     }
     else {
-        RESULT(r, s1l);
-        my_mul(rp, s1p, n(s1), s2p, n(s2));
+        OUTPUT(r, s1l);
+        my_mul(rp, s1p, N(s1), s2p, N(s2));
     }
 
 void
@@ -166,8 +171,8 @@ PREINIT:
     STRLEN s1l;
 CODE:
     EXTRACT(s1);
-    RESULT(r, s1l * 2);
-    mpn_sqr(rp, s1p, n(s1));
+    OUTPUT(r, s1l * 2);
+    mpn_sqr(rp, s1p, N(s1));
 
 void
 mpn_sqr(r, s1)
@@ -178,8 +183,8 @@ PREINIT:
     STRLEN s1l, s1l2, rl;
 CODE:
     EXTRACT(s1);
-    RESULT(r, s1l);
-    my_sqr(rp, s1p, n(s1));
+    OUTPUT(r, s1l);
+    my_sqr(rp, s1p, N(s1));
 
 void
 mpn_divrem(q, r, n, d)
@@ -197,7 +202,7 @@ CODE:
     EXTRACT(d);
     dn = dl / sizeof(mp_limb_t);
     ql = (nl > dl ? nl : dl);
-    RESULT(q, ql);
+    OUTPUT(q, ql);
     while(1) {
         if (dn == 0)
             Perl_croak(aTHX_ "division by zero");
@@ -210,18 +215,31 @@ CODE:
     }
     else {
         mp_size_t i, qn = ql / sizeof(mp_limb_t);
-        RESULT(r, dl);
+        OUTPUT(r, dl);
         mpn_tdiv_qr(qp, rp, 0, np, nn, dp, dn);
         for (i = nn - dn + 1; i < qn; i++)
             qp[i] = 0;
     }
 
+void
+mpn_divexact_by3(r, s1)
+    SV *r
+    SV *s1
+PREINIT:
+    mp_limb_t *rp, *s1p;
+    STRLEN s1l;
+CODE:
+    EXTRACT(s1);
+    OUTPUT(r, s1l);
+    if (!mpn_divexact_by3(rp, s1p, N(s1)))
+        SvOK_off(r);
+
 SV *
-mpn_get_str(s1, base = 10)
+mpn_get_str0(s1, base = 10)
     SV *s1
     int base;
 ALIAS:
-    mpn_get_strp = 1
+    mpn_get_str = 1
 PREINIT:
     mp_limb_t *s1p;
     STRLEN s1l, rl, scale, i;
@@ -238,7 +256,7 @@ CODE:
     RETVAL = newSV(s1l * scale + 1);
     SvPOK_on(RETVAL);
     rp = SvPV_nolen(RETVAL);
-    rl = mpn_get_str(rp, base, s1p, n(s1));
+    rl = mpn_get_str(rp, base, s1p, N(s1));
     for (i = 0; (i < rl - 1) && (rp[i] == 0); i++);
     if (i) {
         rl -= i;
@@ -258,13 +276,13 @@ OUTPUT:
     RETVAL
 
 void
-mpn_set_str(r, s, base = 10, bitlen = 0)
+mpn_set_str0(r, s, base = 10, bitlen = 0)
     SV *r
     SV *s
     int base
     int bitlen
 ALIAS:
-    mpn_set_strp = 1
+    mpn_set_str = 1
 PREINIT:
     mp_limb_t *rp;
     STRLEN rl, sl, scale;
@@ -296,7 +314,7 @@ CODE:
               (base <= 16) ? 2 :
                              1 );
     rl = sl / scale + 2 * sizeof(mp_limb_t);
-    RESULT(r, rl);
+    OUTPUT(r, rl);
     rn = mpn_set_str(rp, spv, sl, base);
     SvCUR_set(r, rn * sizeof(mp_limb_t));
     if (bitlen)
@@ -308,5 +326,6 @@ mpn_set_bitlen(r, bitlen, sign_extend = 0)
     int bitlen
     int sign_extend
 CODE:
+    check_output(aTHX_ r);
     my_set_bitlen(aTHX_ r, bitlen, sign_extend);
 
