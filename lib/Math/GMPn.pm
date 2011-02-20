@@ -15,6 +15,9 @@ our @EXPORT_OK = qw( mpn_add
                      mpn_esqr
                      mpn_divrem
 
+                     mpn_or_int
+                     
+
 		     mpn_get_str
 		     mpn_get_str0
 		     mpn_set_str

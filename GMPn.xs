@@ -71,9 +71,24 @@ static mp_limb_t *prepare_output(pTHX_ SV *sv, STRLEN l) {
     return r;
 }
 
-#define EXTRACT(sv) ((sv ## p = (mp_limb_t*)SvPV_nolen(sv)), (sv ## l = SvCUR(sv)))
+#define ARG(sv) ((sv ## p = (mp_limb_t*)SvPV_nolen(sv)), (sv ## l = SvCUR(sv)))
 #define OUTPUT(sv, len) (sv ## p = prepare_output(aTHX_ sv, (len)))
+#define CHECK(r, s) (s ## p = (r == s ? r ## p : s ## p))
+#define OUTPUT_AND_CHECK(r, len, s) (OUTPUT(r, len), CHECK(r, s))
 #define N(sv) (sv ## l / sizeof(mp_limb_t))
+
+typedef (*bitop2_t)(mp_limb_t, mp_limb_t, mp_size_t, mp_limb_t, mp_size_t);
+
+
+#define mpn_ior_ix  PTR2IV(&mpn_ior)
+#define mpn_xor_ix  PTR2IV(&mpn_xor)
+#define mpn_and_ix  PTR2IV(&mpn_and)
+#define mpn_andn_ix PTR2IV(&mpn_andn)
+#define mpn_iorn_ix PTR2IV(&mpn_iorn)
+#define mpn_nand_ix PTR2IV(&mpn_nand)
+#define mpn_nior_ix PTR2IV(&mpn_nior)
+#define mpn_xnor_ix PTR2IV(&mpn_xnor)
+
 
 MODULE = Math::GMPn		PACKAGE = Math::GMPn		
 
@@ -93,15 +108,44 @@ PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l, rl;
 CODE:
-    EXTRACT(s1);
-    EXTRACT(s2);
+    ARG(s1);
+    ARG(s2);
     if (s1l < s2l) {
-        OUTPUT(r, s2l);
+        OUTPUT_AND_CHECK(r, s2l, s1);
         mpn_add(rp, s2p, N(s2), s1p, N(s1));
     }
     else {
-        OUTPUT(r, s1l);
+        OUTPUT_AND_CHECK(r, s1l, s2);
         mpn_add(rp, s1p, N(s1), s2p, N(s2));
+    }
+
+void
+_mpn_bit(r, s1, s2)
+    SV *r
+    SV *s1
+    SV *s2
+ALIAS:
+    mpn_ior  = mpn_ior_ix
+    mpn_xor  = mpn_xor_ix
+    mpn_and  = mpn_and_ix
+    mpn_andn = mpn_andn_ix
+    mpn_iorn = mpn_iorn_ix
+    mpn_nand = mpn_nand_ix
+    mpn_nior = mpn_nior_ix
+    mpn_xnor = mpn_xnor_ix
+PREINIT:
+    mp_limb_t *s1p, *s2p, *rp;
+    STRLEN s1l, s2l, rl;
+CODE:
+    ARG(s1);
+    ARG(s2);
+    if (s1l < s2l) {
+        OUTPUT_AND_CHECK(r, s2l, s1);
+        (*(bitop2)(PTR2INT(ix)))(rp, s2p, N(s2), s1p, N(s1));
+    }
+    else {
+        OUTPUT_AND_CHECK(r, s1l, s2);
+        (*(bitop2)(PTR2INT(ix)))(rp, s1p, N(s1), s2p, N(s2));
     }
 
 void
@@ -113,15 +157,15 @@ PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
 CODE:
-    EXTRACT(s1);
-    EXTRACT(s2);
+    ARG(s1);
+    ARG(s2);
     if (s1l < s2l) {
-        OUTPUT(r, s1l);
+        OUTPUT_AND_CHECK(r, s2l, s1);
         mpn_sub(rp, s2p, N(s2), s1p, N(s1));
         mpn_neg_n(rp, rp, N(s2));
     }
     else {
-        OUTPUT(r, s2l);
+        OUTPUT_AND_CHECK(r, s1l, s2);
         mpn_sub(rp, s1p, N(s1), s2p, N(s2));
     }
 
@@ -134,8 +178,10 @@ PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
 CODE:
-    EXTRACT(s1);
-    EXTRACT(s2);
+    if ((r == s1) || (r == s2))
+        Perl_croak(aTHX_ "mpn_emul arguments must not overlap");
+    ARG(s1);
+    ARG(s2);
     OUTPUT(r, s1l + s2l);
     if (s1l < s2l)
         mpn_mul(rp, s2p, N(s2), s1p, N(s1));
@@ -151,8 +197,10 @@ PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
 CODE:
-    EXTRACT(s1);
-    EXTRACT(s2);
+    if ((r == s1) || (r == s2))
+        Perl_croak(aTHX_ "mpn_mul arguments must not overlap");
+    ARG(s1);
+    ARG(s2);
     if (s1l < s2l) {
         OUTPUT(r, s2l);
         my_mul(rp, s2p, N(s2), s1p, N(s1));
@@ -170,7 +218,9 @@ PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l;
 CODE:
-    EXTRACT(s1);
+    if (r == s1)
+        Perl_croak(aTHX_ "mpn_esqr arguments must not overlap");
+    ARG(s1);
     OUTPUT(r, s1l * 2);
     mpn_sqr(rp, s1p, N(s1));
 
@@ -182,7 +232,9 @@ PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l, s1l2, rl;
 CODE:
-    EXTRACT(s1);
+    if (r == s1)
+        Perl_croak(aTHX_ "mpn_esqr arguments must not overlap");
+    ARG(s1);
     OUTPUT(r, s1l);
     my_sqr(rp, s1p, N(s1));
 
@@ -197,9 +249,11 @@ PREINIT:
     STRLEN nl, dl, ql;
     mp_size_t dn, nn;
 CODE:
-    EXTRACT(n);
+    if ((q == n) || (q == d) || (r == n) || (r == d))
+        Perl_croak(aTHX_ "mpn_divrem arguments must not overlap");
+    ARG(n);
     nn = nl / sizeof(mp_limb_t);
-    EXTRACT(d);
+    ARG(d);
     dn = dl / sizeof(mp_limb_t);
     ql = (nl > dl ? nl : dl);
     OUTPUT(q, ql);
@@ -229,10 +283,44 @@ PREINIT:
     mp_limb_t *rp, *s1p;
     STRLEN s1l;
 CODE:
-    EXTRACT(s1);
+    if (r == s1)
+        Perl_croak(aTHX_ "mpn_divexact_by3 arguments must not overlap");
+    ARG(s1);
     OUTPUT(r, s1l);
     if (!mpn_divexact_by3(rp, s1p, N(s1)))
         SvOK_off(r);
+
+void
+mpn_or(r, s1, s2)
+    SV *r
+    SV *s1
+    SV *s2
+PREINIT:
+    mp_limb_t *rp, *s1p, *s2p;
+    STRLEN s1l, s2l;
+CODE:
+    
+
+
+void
+mpn_or_int(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+ALIAS:
+    mpn_ior_int = 1
+PREINIT:
+    mp_limb_t *rp, *s1p;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    if  (r != s1)
+        sv_setsv(r, s1);
+    if (N(s1) >= 1)
+        *(mp_limb_t*)(SvPV_nolen(r)) |= s2;        
+
+
 
 SV *
 mpn_get_str0(s1, base = 10)
@@ -247,7 +335,7 @@ PREINIT:
 CODE:
     if (base < 2) Perl_croak(aTHX_ "base < 2 in get_str");
     s1 = sv_2mortal(newSVsv(s1));
-    EXTRACT(s1);
+    ARG(s1);
     scale = ( (base ==  2) ? 8 :
               (base ==  3) ? 6 :
               (base <=  6) ? 4 :
@@ -289,6 +377,8 @@ PREINIT:
     mp_size_t rn;
     unsigned char *spv;
 CODE:
+    if (r == s)
+        Perl_croak(aTHX_ "mpn_set_str arguments must not overlap");        
     if (ix) {
         STRLEN i;
         s = sv_2mortal(newSVsv(s));
