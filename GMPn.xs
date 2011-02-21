@@ -1,4 +1,4 @@
-/* -*- Mode: C -*- */
+/* -*- Mode: XS -*- */
 
 #define PERL_NO_GET_CONTEXT 1
 
@@ -10,6 +10,24 @@
 #include <gmp.h>
 
 static void
+my_addmul(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n, mp_limb_t *s2p, mp_size_t s2n) {
+    if (s1n && s2n) {
+        mp_size_t i = s2n;
+        while (i--)
+            mpn_addmul_1(rp + i, s1p, s1n - i, s2p[i]);
+    }
+}
+
+static void
+my_submul(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n, mp_limb_t *s2p, mp_size_t s2n) {
+    if (s1n && s2n) {
+        mp_size_t i = s2n;
+        while (i--)
+            mpn_submul_1(rp + i, s1p, s1n - i, s2p[i]);
+    }
+}
+
+static void
 my_mul(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n, mp_limb_t *s2p, mp_size_t s2n) {
     if (s1n && s2n) {
         mp_size_t i = s2n;
@@ -18,7 +36,7 @@ my_mul(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n, mp_limb_t *s2p, mp_size_t s
             mpn_addmul_1(rp + i, s1p, s1n - i, s2p[i]);
     }
     else
-        nmp_zero(rp, s1n);
+        while (s1n--) rp[s1n] = 0;
 }
 
 static void
@@ -39,7 +57,7 @@ my_set_bitlen(pTHX_ SV *sv, int bitlen, int sign_extend) {
     if (n * GMP_NUMB_BITS != bitlen)
         Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
                    bitlen, GMP_NUMB_BITS);
-    len = n *sizeof(mp_limb_t);
+    len = n * sizeof(mp_limb_t);
     if (!SvPOK(sv) || (len > SvCUR(sv))) {
         mp_limb_t *p;
         mp_size_t i;
@@ -47,7 +65,7 @@ my_set_bitlen(pTHX_ SV *sv, int bitlen, int sign_extend) {
         SvPOK_on(sv);
         i = SvCUR(sv) / sizeof(mp_limb_t);
         p = (mp_limb_t*)SvGROW(sv, len);
-        if (sign_extend && i && (p[i - 1] & (1<< (GMP_NUMB_BITS -1))))
+        if (sign_extend && i && (p[i - 1] & (((mp_limb_t)1)<< (GMP_NUMB_BITS -1))))
             for (; i < n; i++) p[i] = ~0;  
         else
             for (; i < n; i++) p[i] = 0;  
@@ -77,27 +95,37 @@ static mp_limb_t *prepare_output(pTHX_ SV *sv, STRLEN l) {
 #define OUTPUT_AND_CHECK(r, len, s) (OUTPUT(r, len), CHECK(r, s))
 #define N(sv) (sv ## l / sizeof(mp_limb_t))
 
-typedef (*bitop2_t)(mp_limb_t, mp_limb_t, mp_size_t, mp_limb_t, mp_size_t);
-
-
-#define mpn_ior_ix  PTR2IV(&mpn_ior)
-#define mpn_xor_ix  PTR2IV(&mpn_xor)
-#define mpn_and_ix  PTR2IV(&mpn_and)
-#define mpn_andn_ix PTR2IV(&mpn_andn)
-#define mpn_iorn_ix PTR2IV(&mpn_iorn)
-#define mpn_nand_ix PTR2IV(&mpn_nand)
-#define mpn_nior_ix PTR2IV(&mpn_nior)
-#define mpn_xnor_ix PTR2IV(&mpn_xnor)
-
-
 MODULE = Math::GMPn		PACKAGE = Math::GMPn		
 
 int
-sizeof_mp_limb_t()
+GMP_LIMB_BYTES()
 CODE:
     RETVAL = sizeof(mp_limb_t);
 OUTPUT:
     RETVAL
+
+int
+GMP_LIMB_BITS()
+CODE:
+    RETVAL = GMP_NUMB_BITS;
+OUTPUT:
+    RETVAL
+
+#ifdef mpn_neg
+
+void
+mpn_neg(r, s1)
+    SV *r
+    SV *s1
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    mpn_neg(rp, s1p, N(s1));
+
+#endif
 
 void
 mpn_add(r, s1, s2)
@@ -120,32 +148,199 @@ CODE:
     }
 
 void
-_mpn_bit(r, s1, s2)
+mpn_add_uint(r, s1, s2)
+    SV *r;
+    SV *s1;
+    UV s2;
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    mpn_add_1(rp, s1p, N(s1), s2);
+
+void
+mpn_sub_uint(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    mpn_sub_1(rp, s1p, N(s1), s2);
+
+UV
+mpn_mod_uint(s1, s2)
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    RETVAL = mpn_mod_1(s1p, N(s1), s2);
+OUTPUT:
+    RETVAL
+
+void
+mpn_lshift(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+    mp_size_t s2off;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    s2off = s2 / GMP_NUMB_BITS;
+    if (s2off) {
+        mp_size_t i = N(s1);
+        if (s2off >= i)
+            while (i--) rp[i] = 0;
+        else {
+            while(i > s2off) {
+                --i;
+                rp[i] = rp[i - s2off];
+            }
+            mpn_lshift(rp + i, rp + i, N(s1) - i, s2 - i * GMP_NUMB_BITS);
+            while (i--) rp[i] = 0;
+        }
+    }
+    else
+        mpn_lshift(rp, s1p, N(s1), s2);
+
+void
+mpn_rshift(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+    mp_size_t s2off;
+CODE:
+    ARG(s1);
+    OUTPUT(r, s1l);
+    s2off = s2 / GMP_NUMB_BITS;
+    if (s2off) {
+        mp_size_t s1n = N(s1), i;
+        if (s2off >= i)
+            while (i--) rp[i] = 0;
+        else {
+            for (i = s2off; i < s1n; i++) rp[i - s2off] = rp[i];
+            mpn_rshift(rp, rp, s1n - s2off, s2 - s2off * GMP_NUMB_BITS);
+            for (i = s1n - s2off; i < s1n; i++) rp[i] = 0;
+        }
+    }
+    else
+        mpn_rshift(rp, s1p, N(s1), s2);
+
+void
+mpn_ior(r, s1, s2)
     SV *r
     SV *s1
     SV *s2
 ALIAS:
-    mpn_ior  = mpn_ior_ix
-    mpn_xor  = mpn_xor_ix
-    mpn_and  = mpn_and_ix
-    mpn_andn = mpn_andn_ix
-    mpn_iorn = mpn_iorn_ix
-    mpn_nand = mpn_nand_ix
-    mpn_nior = mpn_nior_ix
-    mpn_xnor = mpn_xnor_ix
+    mpn_xor  = 1
+    mpn_and  = 2
+    mpn_andn = 3
+    mpn_iorn = 4
+    mpn_nand = 5
+    mpn_nior = 6
+    mpn_xnor = 7
 PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l, rl;
+    mp_size_t i, s1n, s2n;
 CODE:
     ARG(s1);
     ARG(s2);
+    s1n = N(s1);
+    s2n = N(s2);
     if (s1l < s2l) {
         OUTPUT_AND_CHECK(r, s2l, s1);
-        (*(bitop2)(PTR2INT(ix)))(rp, s2p, N(s2), s1p, N(s1));
+        switch(ix) {
+        case 0:
+            for (i = 0; i < s1n; i++) rp[i] = s1p[i] | s2p[i];
+            for (; i < s2n; i++) rp[i] = s2p[i];
+            break;
+        case 1:
+            for (i = 0; i < s1n; i++) rp[i] = s1p[i] ^ s2p[i];
+            for (; i < s2n; i++) rp[i] = s2p[i];
+            break;
+        case 2:
+            for (i = 0; i < s1n; i++) rp[i] = s1p[i] & s2p[i];
+            for (; i < s2n; i++) rp[i] = 0;
+            break;
+        case 3:
+            for (i = 0; i < s1n; i++) rp[i] = s1p[i] & ~s2p[i];
+            for (; i < s2n; i++) rp[i] = 0;
+            break;
+        case 4:
+            for (i = 0; i < s1n; i++) rp[i] = s1p[i] | ~s2p[i];
+            for (; i < s2n; i++) rp[i] = ~s2p[i];
+            break;
+        case 5:
+            for (i = 0; i < s1n; i++) rp[i] = ~(s1p[i] & s2p[i]);
+            for (; i < s2n; i++) rp[i] = ~(mp_limb_t)0;
+            break;
+        case 6:
+            for (i = 0; i < s1n; i++) rp[i] = ~(s1p[i] & s2p[i]);
+            for (; i < s2n; i++) rp[i] = ~s2p[i];
+            break;
+        case 7:
+            for (i = 0; i < s1n; i++) rp[i] = ~(s1p[i] ^ s2p[i]);
+            for (; i < s2n; i++) rp[i] = ~s2p[i];
+            break;
+        default:
+            Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+        }
+
     }
     else {
         OUTPUT_AND_CHECK(r, s1l, s2);
-        (*(bitop2)(PTR2INT(ix)))(rp, s1p, N(s1), s2p, N(s2));
+        switch(ix) {
+        case 0:
+            for (i = 0; i < s2n; i++) rp[i] = s1p[i] | s2p[i];
+            for (; i < s1n; i++) rp[i] = s1p[i];
+           break;
+        case 1:
+            for (i = 0; i < s2n; i++) rp[i] = s1p[i] ^ s2p[i];
+            for (; i < s1n; i++) rp[i] = s1p[i];
+            break;
+        case 2:
+            for (i = 0; i < s2n; i++) rp[i] = s1p[i] & s2p[i];
+            for (; i < s1n; i++) rp[i] = 0;
+            break;
+        case 3:
+            for (i = 0; i < s2n; i++) rp[i] = s1p[i] & ~s2p[i];
+            for (; i < s1n; i++) rp[i] = 0;
+            break;
+        case 4:
+            for (i = 0; i < s2n; i++) rp[i] = s1p[i] | ~s2p[i];
+            for (; i < s1n; i++) rp[i] = s1p[i];
+            break;
+        case 5:
+            for (i = 0; i < s2n; i++) rp[i] = ~(s1p[i] & s2p[i]);
+            for (; i < s1n; i++) rp[i] = ~(mp_limb_t)0;
+            break;
+        case 6:
+            for (i = 0; i < s2n; i++) rp[i] = ~(s1p[i] & s2p[i]);
+            for (; i < s1n; i++) rp[i] = ~s1p[i];
+            break;
+        case 7:
+            for (i = 0; i < s2n; i++) rp[i] = ~(s1p[i] ^ s2p[i]);
+            for (; i < s1n; i++) rp[i] = ~s1p[i];
+            break;
+        default:
+            Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+        }
     }
 
 void
@@ -170,7 +365,7 @@ CODE:
     }
 
 void
-mpn_emul(r, s1, s2)
+mpn_mul_ext(r, s1, s2)
     SV *r
     SV *s1       
     SV *s2
@@ -209,9 +404,76 @@ CODE:
         OUTPUT(r, s1l);
         my_mul(rp, s1p, N(s1), s2p, N(s2));
     }
+ 
+void
+mpn_mul_uint(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+CODE:
+    if (r == s1)
+        Perl_croak(aTHX_ "mpn_mul_uint arguments must not overlap");
+    ARG(s1);
+    OUTPUT(r, s1l);
+    mpn_mul_1(rp, s1p, N(s1), s2);
+       
+void
+mpn_addmul(r, s1, s2)
+    SV *r
+    SV *s1
+    SV *s2
+ALIAS:
+    mpn_submul = 1
+PREINIT:
+    mp_limb_t *s1p, *s2p, *rp;
+    STRLEN s1l, s2l, rl;
+    mp_size_t i;
+CODE:
+    if ((r == s1) || (r == s2))
+        Perl_croak(aTHX_ "mpn_addmul arguments must not overlap");
+    ARG(r);
+    ARG(s1);
+    ARG(s2);
+    if (s1l < s2l) {
+        OUTPUT(r, s2l);
+        if (rl < s2l) for (i = N(r); i < N(s2); i++) rp[i] = 0;
+        if (ix)
+            my_submul(rp, s2p, N(s2), s1p, N(s1));
+        else
+            my_addmul(rp, s2p, N(s2), s1p, N(s1));
+    }
+    else {
+        OUTPUT(r, s1l);
+        if (rl < s1l) for (i = N(r); i < N(s1); i++) rp[i] = 0;
+        if (ix)
+            my_addmul(rp, s1p, N(s1), s2p, N(s2));
+        else
+            my_submul(rp, s1p, N(s1), s2p, N(s2));
+    }
 
 void
-mpn_esqr(r, s1)
+mpn_addmul_uint(r, s1, s2)
+    SV *r
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l, rl;
+    mp_size_t i;
+CODE:
+    if (r == s1)
+        Perl_croak(aTHX_ "mpn_mul_uint arguments must not overlap");
+    ARG(r);
+    ARG(s1);
+    OUTPUT(r, s1l);
+    if (rl < s1l) for (i = N(r); i < N(s1); i++) rp[i] = 0;
+    mpn_addmul_1(rp, s1p, N(s1), s2);
+
+void
+mpn_sqr_ext(r, s1)
     SV *r
     SV *s1
 PREINIT:
@@ -291,36 +553,255 @@ CODE:
         SvOK_off(r);
 
 void
-mpn_or(r, s1, s2)
-    SV *r
-    SV *s1
-    SV *s2
-PREINIT:
-    mp_limb_t *rp, *s1p, *s2p;
-    STRLEN s1l, s2l;
-CODE:
-    
-
-
-void
-mpn_or_int(r, s1, s2)
+mpn_ior_uint(r, s1, s2)
     SV *r
     SV *s1
     UV s2
 ALIAS:
-    mpn_ior_int = 1
+    mpn_xor_uint  = 1
+    mpn_and_uint  = 2
+    mpn_andn_uint = 3
+    mpn_iorn_uint = 4
+    mpn_nand_uint = 5
+    mpn_nior_uint = 6
+    mpn_xnor_uint = 7
 PREINIT:
     mp_limb_t *rp, *s1p;
     STRLEN s1l;
+    mp_limb_t s1n;
 CODE:
     ARG(s1);
     OUTPUT(r, s1l);
-    if  (r != s1)
-        sv_setsv(r, s1);
+    s1n = N(s1);
+    switch (ix) {
+    case 0:
+        rp[0] = s1p[0] | s2;
+        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+        break;
+    case 1:
+        rp[0] = s1p[0] ^ s2;
+        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+        break;
+    case 2:
+        rp[0] = s1p[0] & s2;
+        while (--s1n) rp[s1n] = 0;
+        break;
+    case 3:
+        rp[0] = s1p[0] & ~s2;
+        while (--s1n) rp[s1n] = 0;
+        break;
+    case 4:
+        rp[0] = s1p[0] | ~s2;
+        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+        break;
+    case 5:
+        rp[0] = ~(s1p[0] & s2);
+        while (--s1n) rp[s1n] = ~(mp_limb_t)0;
+        break;
+    case 6:
+        rp[0] = ~(s1p[0] | s2);
+        while (--s1n) rp[s1n] = ~s1p[s1n];
+        break;
+    case 7:
+        rp[0] = ~(s1p[0] ^ s2);
+        while (--s1n) rp[s1n] = ~s1p[s1n];
+        break;
+    default:
+        Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+    }
     if (N(s1) >= 1)
         *(mp_limb_t*)(SvPV_nolen(r)) |= s2;        
 
+int
+mpn_cmp(s1, s2)
+    SV *s1
+    SV *s2
+PREINIT:
+    mp_limb_t *s1p, *s2p;
+    STRLEN s1l, s2l;
+    mp_size_t s1n, s2n;
+CODE:
+    ARG(s1);
+    ARG(s2);
+    s1n = N(s1);
+    s2n = N(s2);
+    if (s1n < s2n) {
+        while (s2n-- > s1n)
+            if (s2p[s2n]) {
+                RETVAL = -1;
+                goto end;
+            }
+        RETVAL = mpn_cmp(s1p, s2p, s1n);
+    }
+    else {
+        while (s1n-- > s2n)
+            if (s1p[s1n]) {
+                RETVAL = 1;
+                goto end;
+            }
+        RETVAL = mpn_cmp(s1p, s2p, s2n);
+    }
+  end:
+    ;
+OUTPUT:
+    RETVAL
 
+UV
+mpn_gcd_uint(s1, s2)
+    SV *s1
+    UV s2
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+    mp_size_t s1n;
+CODE:
+    ARG(s1);
+    s1n = N(s1);
+    while (s1n) {
+        if (s1p[s1n - 1]) break;
+        s1n--;
+    }
+    if (s1n && s2)
+        RETVAL = mpn_gcd1(s1p, s1n, s2);
+    else
+        Perl_croak(aTHX_ "division by zero error");
+
+void
+mpn_gcd_dest(r, s1, s2)
+    SV *r;
+    SV *s1;
+    SV *s2;
+PREINIT:
+    mp_limb_t *rp, *s1p, *s2p;
+    STRLEN s1l, s2l, rl;
+    mp_size_t s1n, s2n, rn, rn1;
+CODE:
+    if ((s1 == r) || (s2 == r) || (s1 == s2))
+        Perl_croak(aTHX_ "mpn_gcd_dest arguments must not overlap");
+    ARG(s1);
+    ARG(s2);
+    s1n = N(s1);
+    s2n = N(s2);
+    rn = (s1n >= s2n ? s1n : s2n);
+    rl = rn / sizeof(mp_limb_t);
+    OUTPUT(r, rl);
+    OUTPUT(s1, rl);
+    OUTPUT(s2, rl);
+    while (s1n) {
+        if (s1p[s1n - 1]) break;
+        s1n--;
+    }
+    while (s2n) {
+        if (s2p[s2n - 1]) break;
+        s2n--;
+    }
+    if (s1n && s2n) {
+        if (!(s2p[0] & 1))
+            Perl_croak(aTHX_ "mpn_gcd_dest third argument must be odd");
+        rn1 = mpn_gcd(rp, s1p, s1n, s2p, s2n);
+        for (; rn1 < rn; rn1++) rp[rn1] = 0;
+    }
+    else
+        Perl_croak(aTHX_ "division by zero error");
+
+void
+mpn_set_random(r, bitlen)
+    SV *r;
+    int bitlen;
+PREINIT:
+    mp_limb_t *rp;
+    mp_size_t rn = bitlen / GMP_NUMB_BITS;
+    STRLEN rl = rn * sizeof(mp_limb_t);
+CODE:
+    if (rn * GMP_NUMB_BITS != bitlen)
+        Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
+                   bitlen, GMP_NUMB_BITS);
+    OUTPUT(r, rl);
+    mpn_random(rp, rn);
+
+UV
+mpn_popcount(s1)
+    SV *s1;
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    RETVAL = mpn_popcount(s1p, N(s1));
+OUTPUT:
+    RETVAL
+
+UV
+mpn_hamdist(s1, s2)
+    SV *s1;
+    SV *s2;
+PREINIT:
+    mp_limb_t *s1p, *s2p;
+    STRLEN s1l, s2l;
+    mp_size_t s1n, s2n;
+CODE:
+    ARG(s1);
+    ARG(s2);
+    s1n = N(s1);
+    s2n = N(s2);
+    if (s1n < s2n)
+        RETVAL = mpn_hamdist(s1p, s2p, s1n) + mpn_popcount(s2p + s1n, s2n - s1n);
+    else if (s1n > s2n)
+        RETVAL = mpn_hamdist(s1p, s2p, s2n) + mpn_popcount(s1p + s2n, s1n - s2n);
+    else
+        RETVAL = mpn_hamdist(s1p, s2p, s2n);
+OUTPUT:
+    RETVAL
+
+SV *
+mpn_perfect_square_p(s1)
+    SV *s1;
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+CODE:
+    RETVAL = (mpn_perfect_square_p(s1p, N(s1)) ? &PL_sv_yes : &PL_sv_no);
+
+IV
+mpn_scan0(s1, offset = 0)
+    SV *s1;
+    UV offset;
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+    mp_size_t s1n;
+CODE:
+    ARG(s1);
+    s1n = N(s1);
+    *((char*)(s1p + s1n)) = 0;
+    if (offset < s1n * GMP_NUMB_BITS) {
+        RETVAL = mpn_scan0(s1p, offset);
+        if (RETVAL >= s1l * 8) RETVAL = -1;
+    }
+    else RETVAL = -1;
+OUTPUT:
+    RETVAL
+
+IV
+mpn_scan1(s1, offset = 0)
+    SV *s1;
+    UV offset;
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+    mp_size_t s1n;
+CODE:
+    ARG(s1);
+    s1n = N(s1);
+    *((char*)(s1p + s1n)) = ~0;
+    if (offset < s1n * GMP_NUMB_BITS) {
+        RETVAL = mpn_scan1(s1p, offset);
+        if (RETVAL >= s1l * 8) RETVAL = -1;
+    }
+    else RETVAL = -1;
+    *((char*)(s1p + s1n)) = 0;
+OUTPUT:
+    RETVAL
 
 SV *
 mpn_get_str0(s1, base = 10)
@@ -331,11 +812,15 @@ ALIAS:
 PREINIT:
     mp_limb_t *s1p;
     STRLEN s1l, rl, scale, i;
+    mp_size_t s1n;
     char *rp;
 CODE:
     if (base < 2) Perl_croak(aTHX_ "base < 2 in get_str");
     s1 = sv_2mortal(newSVsv(s1));
     ARG(s1);
+    s1n = N(s1);
+    while (s1n && !s1p[s1n - 1]) s1n--; /* discard high limbs equal to 0 */
+    s1l = s1n * sizeof(mp_limb_t);
     scale = ( (base ==  2) ? 8 :
               (base ==  3) ? 6 :
               (base <=  6) ? 4 :
@@ -344,20 +829,26 @@ CODE:
     RETVAL = newSV(s1l * scale + 1);
     SvPOK_on(RETVAL);
     rp = SvPV_nolen(RETVAL);
-    rl = mpn_get_str(rp, base, s1p, N(s1));
-    for (i = 0; (i < rl - 1) && (rp[i] == 0); i++);
-    if (i) {
-        rl -= i;
-        Move(rp + i, rp, rl, char);
+    if (s1n) {
+        rl = mpn_get_str(rp, base, s1p, N(s1));
+        for (i = 0; (i < rl - 1) && (rp[i] == 0); i++);
+        if (i) {
+            rl -= i;
+            Move(rp + i, rp, rl, char);
+        }
     }
+    else {
+        rp[0] = 0;
+        rl = 1;
+    }
+    rp[rl] = 0;
     SvCUR_set(RETVAL, rl);
     if (ix) {
         STRLEN i;
         char *pv = SvPV_nolen(RETVAL);
         for (i = 0; i < rl; i++) {
             char c = pv[i];
-            if (c < 10) pv[i] = c + '0';
-            else pv[i] = c + 'a' - 10;
+            pv[i] = (c < 10 ? c + '0' : c + ('a' - 10));
         }
     }
 OUTPUT:
@@ -418,4 +909,68 @@ mpn_set_bitlen(r, bitlen, sign_extend = 0)
 CODE:
     check_output(aTHX_ r);
     my_set_bitlen(aTHX_ r, bitlen, sign_extend);
+
+void
+mpn_set_uint(r, s1, bitlen = GMP_NUMB_BITS)
+    SV *r;
+    UV s1;
+    UV bitlen;
+PREINIT:
+    mp_limb_t *rp;
+    mp_size_t rn, i;
+CODE:
+    rn = bitlen / GMP_NUMB_BITS;
+    if (rn * GMP_NUMB_BITS != bitlen)
+        Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
+                   bitlen, GMP_NUMB_BITS);
+    OUTPUT(r, rn * sizeof(mp_limb_t));
+    if (rn > 0) {
+        rp[0] = s1;
+        for (i = 1; i < rn; i++) rp[i] = 0;
+    }
+
+UV
+mpn_setior_uint(r, s1, limb_offset = 0, bitlen = 0)
+    SV *r;
+    UV s1;
+    UV limb_offset;
+    UV bitlen;
+PREINIT:
+    mp_limb_t *rp;
+    STRLEN rl;
+    mp_size_t rn, rn1, i;
+CODE:
+    ARG(r);
+    rn = N(r);
+    if (bitlen) {
+        rn1 = bitlen / GMP_NUMB_BITS;
+        if (rn1 * GMP_NUMB_BITS != bitlen)
+            Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
+                       bitlen, GMP_NUMB_BITS);
+        if (limb_offset >= rn1)
+            Perl_croak(aTHX_ "limb_offset out of the range given by bitlen");
+    }
+    else
+        rn1 = (rn > limb_offset ? rn : limb_offset + 1);
+    OUTPUT(r, rn1 * sizeof(mp_limb_t));
+    while (rn < rn1) {
+        rp[rn++] = 0;
+    }
+    rp[limb_offset] |= s1;
+
+
+UV
+mpn_get_uint(s1, limb_offset = 0)
+    SV *s1;
+    UV limb_offset;
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+    mp_size_t s1n;
+CODE:
+    ARG(s1);
+    s1n = N(s1);
+    RETVAL = (limb_offset < s1n ? s1p[limb_offset] : 0);
+OUTPUT:
+    RETVAL
 

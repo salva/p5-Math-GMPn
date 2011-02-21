@@ -7,25 +7,76 @@ use warnings;
 require Exporter;
 
 our @ISA = qw(Exporter);
-our @EXPORT_OK = qw( mpn_add
-		     mpn_sub
-		     mpn_mul
-		     mpn_sqr
-		     mpn_emul
-                     mpn_esqr
-                     mpn_divrem
+our @EXPORT = qw( GMP_LIMB_BITS
+                  GMP_LIMB_BYTES
 
-                     mpn_or_int
-                     
+                  mpn_neg
+                  mpn_add
+                  mpn_sub
+                  mpn_mul
+                  mpn_sqr
+                  mpn_emul
+                  mpn_divrem
+                  mpn_addmul
+                  mpn_submul
 
-		     mpn_get_str
-		     mpn_get_str0
-		     mpn_set_str
-		     mpn_set_str0
+                  mpn_popcount
+                  mpn_hamdist
 
-                     mpn_set_bitlen
-		  );
-our @EXPORT = @EXPORT_OK; # remove me!
+                  mpn_divexact_by3
+
+                  mpn_mul_ext
+                  mpn_sqr_ext
+
+                  mpn_add_uint
+                  mpn_sub_uint
+                  mpn_mod_uint
+                  mpn_mul_uint
+                  mpn_addmul_uint
+                  mpn_submul_uint
+
+                  mpn_lshift
+                  mpn_rshift
+
+                  mpn_scan0
+                  mpn_scan1
+
+                  mpn_ior
+                  mpn_xor
+                  mpn_and
+                  mpn_andn
+                  mpn_iorn
+                  mpn_nand
+                  mpn_nior
+                  mpn_xnor
+
+                  mpn_ior_uint
+                  mpn_xor_uint
+                  mpn_and_uint
+                  mpn_andn_uint
+                  mpn_iorn_uint
+                  mpn_nand_uint
+                  mpn_nior_uint
+                  mpn_xnor_uint
+
+                  mpn_cmp
+                  mpn_perfect_square_p
+
+                  mpn_gcd_dest
+
+                  mpn_get_str
+                  mpn_get_str0
+                  mpn_set_str
+                  mpn_set_str0
+
+                  mpn_set_uint
+                  mpn_get_uint
+                  mpn_setior_uint
+
+                  mpn_set_bitlen
+                  mpn_set_random
+
+               );
 
 our $VERSION = '0.01';
 
@@ -71,38 +122,22 @@ result lenght is equal to that of the largest input. For instance,
 adding a 128bit string and a 256bit string will output a 256bit
 string.
 
-
-
-
 =head2 EXPORT
 
 =over 4
 
 =item mpn_set_str($to, $str, $base, $bitlen)
 
-
 =back
-
 
 
 =head1 SEE ALSO
 
-Mention other useful documentation such as the documentation of
-related modules or operating system documentation (such as man pages
-in UNIX), or any relevant external documentation such as RFCs or
-standards.
-
-If you have a mailing list set up for your module, mention it here.
-
-If you have a web site set up for your module, mention it here.
-
-=head1 AUTHOR
-
-Salvador Fandino, E<lt>salva@E<gt>
+L<Math::GMPz>, L<Math::Int128>.
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2011 by Salvador Fandino
+Copyright (C) 2011 by Salvador FaE<ntilde>dino E<lt>sfandino@yahoo.comE<gt>
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.10.1 or,
