@@ -74,23 +74,27 @@ my_set_bitlen(pTHX_ SV *sv, int bitlen, int sign_extend) {
     SvCUR_set(sv, len);
 }
 
-static void
-check_output(pTHX_ SV *sv) {
-    if (SvTHINKFIRST(sv)) Perl_croak(aTHX_ "read only scalar used as output argument");
+#define CHECK_OUTPUT(r) (SvTHINKFIRST(r) ? Perl_croak(aTHX_ "read only scalar used as output argument") : 0)
+
+#define ALIGNEDP(spi) (((spi) & (sizeof(mp_limb_t) - 1)) ? Perl_croak(aTHX_ "some argument is unaligned") : 0)
+#define ALIGNED1(a) (ALIGNEDP((IV)a ## p))
+#define ALIGNED2(a, b) (ALIGNEDP(((IV)a ## p) | ((IV)b ## p)))
+#define ALIGNED3(a, b, c) (ALIGNEDP(((IV)a ## p) | ((IV)b ## p) | ((IV)c ## p)))
+
+static mp_limb_t *prepare_output(pTHX_ SV *r, STRLEN l) {
+    mp_limb_t *rp;
+    CHECK_OUTPUT(r);
+    SvUPGRADE(r, SVt_PV);
+    rp = (mp_limb_t*)SvGROW(r, l);
+    SvCUR_set(r, l);
+    SvPOK_on(r);
+    return rp;
 }
 
-static mp_limb_t *prepare_output(pTHX_ SV *sv, STRLEN l) {
-    mp_limb_t *r;
-    check_output(aTHX_ sv);
-    SvUPGRADE(sv, SVt_PV);
-    r = (mp_limb_t*)SvGROW(sv, l);
-    SvCUR_set(sv, l);
-    SvPOK_on(sv);
-    return r;
-}
+#define PREPARE_OUTPUT(r, l) ((((SvFLAGS(r) & (SVf_THINKFIRST | SVf_POK)) == SVf_POK) && l == SvCUR(r)) ? (mp_limb_t *)SvPV_nolen(r) : prepare_output(aTHX_ r, l))
 
 #define ARG(sv) ((sv ## p = (mp_limb_t*)SvPV_nolen(sv)), (sv ## l = SvCUR(sv)))
-#define OUTPUT(sv, len) (sv ## p = prepare_output(aTHX_ sv, (len)))
+#define OUTPUT(sv, len) (sv ## p = PREPARE_OUTPUT(sv, (len)))
 #define CHECK(r, s) (s ## p = (r == s ? r ## p : s ## p))
 #define OUTPUT_AND_CHECK(r, len, s) (OUTPUT(r, len), CHECK(r, s))
 #define N(sv) (sv ## l / sizeof(mp_limb_t))
@@ -122,6 +126,7 @@ PREINIT:
     STRLEN s1l;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     OUTPUT(r, s1l);
     mpn_neg(rp, s1p, N(s1));
 
@@ -140,10 +145,12 @@ CODE:
     ARG(s2);
     if (s1l < s2l) {
         OUTPUT_AND_CHECK(r, s2l, s1);
+        ALIGNED3(s1, s2, r);
         mpn_add(rp, s2p, N(s2), s1p, N(s1));
     }
     else {
         OUTPUT_AND_CHECK(r, s1l, s2);
+        ALIGNED3(r, s1, s2);
         mpn_add(rp, s1p, N(s1), s2p, N(s2));
     }
 
@@ -158,6 +165,7 @@ PREINIT:
 CODE:
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     mpn_add_1(rp, s1p, N(s1), s2);
 
 void
@@ -171,6 +179,7 @@ PREINIT:
 CODE:
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     mpn_sub_1(rp, s1p, N(s1), s2);
 
 UV
@@ -182,6 +191,7 @@ PREINIT:
     STRLEN s1l;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     RETVAL = mpn_mod_1(s1p, N(s1), s2);
 OUTPUT:
     RETVAL
@@ -199,6 +209,7 @@ CODE:
     ARG(s1);
     OUTPUT(r, s1l);
     s2off = s2 / GMP_NUMB_BITS;
+    ALIGNED2(r, s1);
     if (s2off) {
         mp_size_t i = N(s1);
         if (s2off >= i)
@@ -228,6 +239,7 @@ CODE:
     ARG(s1);
     OUTPUT(r, s1l);
     s2off = s2 / GMP_NUMB_BITS;
+    ALIGNED2(r, s1);
     if (s2off) {
         mp_size_t s1n = N(s1), i;
         if (s2off >= i)
@@ -265,6 +277,7 @@ CODE:
     s2n = N(s2);
     if (s1l < s2l) {
         OUTPUT_AND_CHECK(r, s2l, s1);
+        ALIGNED3(r, s1, s2);
         switch(ix) {
         case 0:
             for (i = 0; i < s1n; i++) rp[i] = s1p[i] | s2p[i];
@@ -305,6 +318,7 @@ CODE:
     }
     else {
         OUTPUT_AND_CHECK(r, s1l, s2);
+        ALIGNED3(r, s1, s2);
         switch(ix) {
         case 0:
             for (i = 0; i < s2n; i++) rp[i] = s1p[i] | s2p[i];
@@ -356,11 +370,13 @@ CODE:
     ARG(s2);
     if (s1l < s2l) {
         OUTPUT_AND_CHECK(r, s2l, s1);
+        ALIGNED3(r, s1, s2);
         mpn_sub(rp, s2p, N(s2), s1p, N(s1));
         mpn_neg_n(rp, rp, N(s2));
     }
     else {
         OUTPUT_AND_CHECK(r, s1l, s2);
+        ALIGNED3(r, s1, s2);
         mpn_sub(rp, s1p, N(s1), s2p, N(s2));
     }
 
@@ -378,6 +394,7 @@ CODE:
     ARG(s1);
     ARG(s2);
     OUTPUT(r, s1l + s2l);
+    ALIGNED3(r, s1, s2);
     if (s1l < s2l)
         mpn_mul(rp, s2p, N(s2), s1p, N(s1));
     else 
@@ -398,10 +415,12 @@ CODE:
     ARG(s2);
     if (s1l < s2l) {
         OUTPUT(r, s2l);
+        ALIGNED3(r, s1, s2);
         my_mul(rp, s2p, N(s2), s1p, N(s1));
     }
     else {
         OUTPUT(r, s1l);
+        ALIGNED3(r, s1, s2);
         my_mul(rp, s1p, N(s1), s2p, N(s2));
     }
  
@@ -418,6 +437,7 @@ CODE:
         Perl_croak(aTHX_ "mpn_mul_uint arguments must not overlap");
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     mpn_mul_1(rp, s1p, N(s1), s2);
        
 void
@@ -439,6 +459,7 @@ CODE:
     ARG(s2);
     if (s1l < s2l) {
         OUTPUT(r, s2l);
+        ALIGNED3(r, s1, s2);
         if (rl < s2l) for (i = N(r); i < N(s2); i++) rp[i] = 0;
         if (ix)
             my_submul(rp, s2p, N(s2), s1p, N(s1));
@@ -447,6 +468,7 @@ CODE:
     }
     else {
         OUTPUT(r, s1l);
+        ALIGNED3(r, s1, s2);
         if (rl < s1l) for (i = N(r); i < N(s1); i++) rp[i] = 0;
         if (ix)
             my_addmul(rp, s1p, N(s1), s2p, N(s2));
@@ -469,6 +491,7 @@ CODE:
     ARG(r);
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     if (rl < s1l) for (i = N(r); i < N(s1); i++) rp[i] = 0;
     mpn_addmul_1(rp, s1p, N(s1), s2);
 
@@ -484,6 +507,7 @@ CODE:
         Perl_croak(aTHX_ "mpn_esqr arguments must not overlap");
     ARG(s1);
     OUTPUT(r, s1l * 2);
+    ALIGNED2(r, s1);
     mpn_sqr(rp, s1p, N(s1));
 
 void
@@ -498,6 +522,7 @@ CODE:
         Perl_croak(aTHX_ "mpn_esqr arguments must not overlap");
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     my_sqr(rp, s1p, N(s1));
 
 void
@@ -519,6 +544,7 @@ CODE:
     dn = dl / sizeof(mp_limb_t);
     ql = (nl > dl ? nl : dl);
     OUTPUT(q, ql);
+    ALIGNED3(q, n, d);
     while(1) {
         if (dn == 0)
             Perl_croak(aTHX_ "division by zero");
@@ -532,6 +558,7 @@ CODE:
     else {
         mp_size_t i, qn = ql / sizeof(mp_limb_t);
         OUTPUT(r, dl);
+        ALIGNED1(r);
         mpn_tdiv_qr(qp, rp, 0, np, nn, dp, dn);
         for (i = nn - dn + 1; i < qn; i++)
             qp[i] = 0;
@@ -549,6 +576,7 @@ CODE:
         Perl_croak(aTHX_ "mpn_divexact_by3 arguments must not overlap");
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     if (!mpn_divexact_by3(rp, s1p, N(s1)))
         SvOK_off(r);
 
@@ -572,6 +600,7 @@ PREINIT:
 CODE:
     ARG(s1);
     OUTPUT(r, s1l);
+    ALIGNED2(r, s1);
     s1n = N(s1);
     switch (ix) {
     case 0:
@@ -623,6 +652,7 @@ PREINIT:
 CODE:
     ARG(s1);
     ARG(s2);
+    ALIGNED2(s1, s2);
     s1n = N(s1);
     s2n = N(s2);
     if (s1n < s2n) {
@@ -656,13 +686,14 @@ PREINIT:
     mp_size_t s1n;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     s1n = N(s1);
     while (s1n) {
         if (s1p[s1n - 1]) break;
         s1n--;
     }
     if (s1n && s2)
-        RETVAL = mpn_gcd1(s1p, s1n, s2);
+        RETVAL = mpn_gcd_1(s1p, s1n, s2);
     else
         Perl_croak(aTHX_ "division by zero error");
 
@@ -687,6 +718,7 @@ CODE:
     OUTPUT(r, rl);
     OUTPUT(s1, rl);
     OUTPUT(s2, rl);
+    ALIGNED3(r, s1, s2);
     while (s1n) {
         if (s1p[s1n - 1]) break;
         s1n--;
@@ -707,7 +739,7 @@ CODE:
 void
 mpn_set_random(r, bitlen)
     SV *r;
-    int bitlen;
+    UV bitlen;
 PREINIT:
     mp_limb_t *rp;
     mp_size_t rn = bitlen / GMP_NUMB_BITS;
@@ -717,6 +749,7 @@ CODE:
         Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
                    bitlen, GMP_NUMB_BITS);
     OUTPUT(r, rl);
+    ALIGNED1(r);
     mpn_random(rp, rn);
 
 UV
@@ -727,6 +760,7 @@ PREINIT:
     STRLEN s1l;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     RETVAL = mpn_popcount(s1p, N(s1));
 OUTPUT:
     RETVAL
@@ -742,6 +776,7 @@ PREINIT:
 CODE:
     ARG(s1);
     ARG(s2);
+    ALIGNED2(s1, s2);
     s1n = N(s1);
     s2n = N(s2);
     if (s1n < s2n)
@@ -772,6 +807,7 @@ PREINIT:
     mp_size_t s1n;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     s1n = N(s1);
     *((char*)(s1p + s1n)) = 0;
     if (offset < s1n * GMP_NUMB_BITS) {
@@ -792,6 +828,7 @@ PREINIT:
     mp_size_t s1n;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     s1n = N(s1);
     *((char*)(s1p + s1n)) = ~0;
     if (offset < s1n * GMP_NUMB_BITS) {
@@ -806,7 +843,7 @@ OUTPUT:
 SV *
 mpn_get_str0(s1, base = 10)
     SV *s1
-    int base;
+    UV base;
 ALIAS:
     mpn_get_str = 1
 PREINIT:
@@ -815,9 +852,11 @@ PREINIT:
     mp_size_t s1n;
     char *rp;
 CODE:
-    if (base < 2) Perl_croak(aTHX_ "base < 2 in get_str");
+    if ((base < 2) || (base > (ix ? 36 : 256)))
+        Perl_croak(aTHX_ "base is out of range");
     s1 = sv_2mortal(newSVsv(s1));
     ARG(s1);
+    ALIGNED1(s1);
     s1n = N(s1);
     while (s1n && !s1p[s1n - 1]) s1n--; /* discard high limbs equal to 0 */
     s1l = s1n * sizeof(mp_limb_t);
@@ -858,8 +897,8 @@ void
 mpn_set_str0(r, s, base = 10, bitlen = 0)
     SV *r
     SV *s
-    int base
-    int bitlen
+    UV base
+    UV bitlen
 ALIAS:
     mpn_set_str = 1
 PREINIT:
@@ -869,7 +908,9 @@ PREINIT:
     unsigned char *spv;
 CODE:
     if (r == s)
-        Perl_croak(aTHX_ "mpn_set_str arguments must not overlap");        
+        Perl_croak(aTHX_ "mpn_set_str arguments must not overlap");
+    if ((base < 2) || (base > (ix ? 36 : 256)))
+        Perl_croak(aTHX_ "base is out of range");
     if (ix) {
         STRLEN i;
         s = sv_2mortal(newSVsv(s));
@@ -884,6 +925,8 @@ CODE:
                 spv[i] = c - 'A' + 10;
             else
                 Perl_croak(aTHX_ "bad digit, ascii code: %d", c);
+            if (spv[i] >= base)
+                Perl_croak(aTHX_ "bad digit, out of range");
         }
     }
     else
@@ -896,6 +939,7 @@ CODE:
                              1 );
     rl = sl / scale + 2 * sizeof(mp_limb_t);
     OUTPUT(r, rl);
+    ALIGNED1(r);
     rn = mpn_set_str(rp, spv, sl, base);
     SvCUR_set(r, rn * sizeof(mp_limb_t));
     if (bitlen)
@@ -907,7 +951,7 @@ mpn_set_bitlen(r, bitlen, sign_extend = 0)
     int bitlen
     int sign_extend
 CODE:
-    check_output(aTHX_ r);
+    CHECK_OUTPUT(r);
     my_set_bitlen(aTHX_ r, bitlen, sign_extend);
 
 void
@@ -924,6 +968,7 @@ CODE:
         Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
                    bitlen, GMP_NUMB_BITS);
     OUTPUT(r, rn * sizeof(mp_limb_t));
+    ALIGNED1(r);
     if (rn > 0) {
         rp[0] = s1;
         for (i = 1; i < rn; i++) rp[i] = 0;
@@ -953,6 +998,7 @@ CODE:
     else
         rn1 = (rn > limb_offset ? rn : limb_offset + 1);
     OUTPUT(r, rn1 * sizeof(mp_limb_t));
+    ALIGNED1(r);
     while (rn < rn1) {
         rp[rn++] = 0;
     }
@@ -969,6 +1015,7 @@ PREINIT:
     mp_size_t s1n;
 CODE:
     ARG(s1);
+    ALIGNED1(s1);
     s1n = N(s1);
     RETVAL = (limb_offset < s1n ? s1p[limb_offset] : 0);
 OUTPUT:
