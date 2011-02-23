@@ -96,9 +96,9 @@ Math::GMPn - Fixed length integer arithmetic.
   use Math::GMPn;
 
   # 128bits;
-  mpn_set_str($a, "123450000000000", 10, 128);
-  mpn_set_str($b, "100000000000001", 10, 128);
-  mpn_set_str($c, "1f1f1f1f1f1f1f1", 16, 128); # hexadecimal
+  mpn_set_str($a,   "123450000000000", 10, 128);
+  mpn_set_str($b,   "100000000000001", 16, 128); # hexadecimal
+  mpn_set_str($c, "0x1f1f1f1f1f1f1f1",  0, 128); # hexadecimal too!
   mpn_set_num($d, 23 * 234);
 
   mpn_mul($r1, $a, $b);
@@ -187,7 +187,7 @@ of the module.
 
 =item secure
 
-Besides, going against the aim for speed, the module performs all the
+Besides going against the aim for speed, the module performs all the
 checks required to ensure that it will not make your program crash
 when bad inputs are given.
 
@@ -207,7 +207,7 @@ For instance:
 
 The rules are as follow:
 
-over 4
+=over 4
 
 =item arguments can overlap in...
 
@@ -477,9 +477,23 @@ int.
 
 =back
 
+=head1 BUGS AND SUPPORT
+
+This is a very early release of this module, so it may contain lots of bugs.
+
+If you find any use the CPAN RT system at L<http://rt.cpan.org> to
+report them or just send my an email with the details.
+
+For questions related to the usage of this module, post them at
+PerlMonks: L<http://perlmonks.org>.
+
 =head1 SEE ALSO
 
-L<Math::GMPz>, L<Math::Int128> ,
+L<Math::GMPz>, L<Math::Int128>, L<Math::GMP>, L<Math::Pari>, L<Math::BigInt>.
+
+L<http://gmplib.org/manual/Low_002dlevel-Functions.html#Low_002dlevel-Functions>.
+
+L<http://perlmonks.org/?node_id=886488>
 
 =head1 COPYRIGHT AND LICENSE
 
@@ -488,6 +502,5 @@ Copyright (C) 2011 by Salvador FaE<ntilde>dino E<lt>sfandino@yahoo.comE<gt>
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.10.1 or,
 at your option, any later version of Perl 5 you may have available.
-
 
 =cut
