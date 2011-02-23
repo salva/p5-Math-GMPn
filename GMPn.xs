@@ -664,8 +664,6 @@ CODE:
     default:
         Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
     }
-    if (N(s1) >= 1)
-        *(mp_limb_t*)(SvPV_nolen(r)) |= s2;        
 
 int
 mpn_cmp(s1, s2)
