@@ -1,6 +1,7 @@
 package Math::GMPn;
 
-use 5.010001;
+our $VERSION = '0.02';
+
 use strict;
 use warnings;
 
@@ -78,8 +79,6 @@ our @EXPORT = qw( GMP_LIMB_BITS
                   mpn_get_bitlen
                   mpn_shorten
                );
-
-our $VERSION = '0.01';
 
 require XSLoader;
 XSLoader::load('Math::GMPn', $VERSION);

@@ -1,5 +1,8 @@
 Revision history for Perl extension Math::GMPn.
 
+0.02  Feb 23, 2011
+        - bug on mpn_ior_uint and family corrected
+
 0.01  Wed Feb 16 18:26:52 2011
 	- original version; created by h2xs 1.23 with options
 		-An Math::GMPn
