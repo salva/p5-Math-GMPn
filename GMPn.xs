@@ -85,7 +85,7 @@ static mp_limb_t *prepare_output(pTHX_ SV *r, STRLEN l) {
     mp_limb_t *rp;
     CHECK_OUTPUT(r);
     SvUPGRADE(r, SVt_PV);
-    rp = (mp_limb_t*)SvGROW(r, l);
+    rp = (mp_limb_t*)SvGROW(r, (l ? l : 1));
     SvCUR_set(r, l);
     SvPOK_on(r);
     return rp;
@@ -565,9 +565,35 @@ CODE:
     }
 
 void
+mpn_sqrtrem(r1, r2, s1)
+    SV *r1;
+    SV *r2;
+    SV *s1;
+PREINIT:
+    mp_limb_t *r1p, *r2p, *s1p;
+    STRLEN s1l;
+    mp_size_t r2n, s1n, rn, i;
+CODE:
+    if ((r1 == r2) || (r1 == s1) || (r2 == s1))
+        Perl_croak(aTHX_ "mpn_sqrtrem arguments must not overlap");
+    ARG(s1);
+    rn = s1n = N(s1);
+    OUTPUT(r1, s1l);
+    OUTPUT(r2, s1l);
+    ALIGNED3(r1, r2, s1);
+    while (s1n && (s1p[s1n - 1] == 0)) s1n--;
+    if (s1n) {
+        r2n = mpn_sqrtrem(r1p, r2p, s1p, s1n);
+        for (i = (s1n + 1) / 2; i < rn; i++) r1p[i] = 0;
+        for (i = r2n; i < rn; i++) r2p[i] = 0;
+    }
+    else
+        while (rn--) r1p[rn] = r2p[rn] = 0;
+
+void
 mpn_divexact_by3(r, s1)
-    SV *r
-    SV *s1
+    SV *r;
+    SV *s1;
 PREINIT:
     mp_limb_t *rp, *s1p;
     STRLEN s1l;
@@ -578,7 +604,7 @@ CODE:
     OUTPUT(r, s1l);
     ALIGNED2(r, s1);
     if (!mpn_divexact_by3(rp, s1p, N(s1)))
-        SvOK_off(r);
+        Perl_croak(aTHX_ "mpn_divexact_by3 requires s1 to be a multiple of 3");
 
 void
 mpn_ior_uint(r, s1, s2)
@@ -894,7 +920,7 @@ OUTPUT:
     RETVAL
 
 void
-mpn_set_str0(r, s, base = 10, bitlen = 0)
+mpn_set_str0(r, s, base = 0, bitlen = 0)
     SV *r
     SV *s
     UV base
@@ -909,12 +935,33 @@ PREINIT:
 CODE:
     if (r == s)
         Perl_croak(aTHX_ "mpn_set_str arguments must not overlap");
-    if ((base < 2) || (base > (ix ? 36 : 256)))
+    if (((ix != 0) || (base != 0)) &&
+        ((base < 2) || (base > (ix ? 36 : 256))))
         Perl_croak(aTHX_ "base is out of range");
     if (ix) {
         STRLEN i;
         s = sv_2mortal(newSVsv(s));
         spv = SvPV(s, sl);
+        if (base == 0) {
+            if ((rl >= 2) && (spv[0] == '0')) {
+                switch (spv[1]) {
+                case 'x':
+                    base = 16;
+                    break;
+                case 'o':
+                    base = 8;
+                    break;
+                case 'b':
+                    base = 2;
+                    break;
+                }
+            }
+            if (base) {
+                spv += 2;
+                rl -= 2;
+            }
+            else base = 10;
+        }
         for (i = 0; i < sl; i++) {
             char c = spv[i];
             if ((c >= '0') && (c <= '9'))
@@ -954,6 +1001,33 @@ CODE:
     CHECK_OUTPUT(r);
     my_set_bitlen(aTHX_ r, bitlen, sign_extend);
 
+UV
+mpn_get_bitlen(s1)
+    SV *s1
+PREINIT:
+    mp_limb_t *s1p;
+    STRLEN s1l;
+CODE:
+    ARG(s1);
+    RETVAL = GMP_NUMB_BITS * N(s1);
+
+void
+mpn_shorten(r, s1)
+    SV *r;
+    SV *s1;
+PREINIT:
+    mp_limb_t *rp, *s1p;
+    STRLEN s1l;
+    mp_limb_t s1n;
+CODE:
+    ARG(s1);
+    ALIGNED1(s1);
+    s1n = N(s1);
+    while (s1n && s1p[s1n - 1]) s1n--;
+    OUTPUT(r, s1n * sizeof(mp_limb_t));
+    ALIGNED1(r);
+    while(s1n--) rp[s1n] = s1p[s1n];
+
 void
 mpn_set_uint(r, s1, bitlen = GMP_NUMB_BITS)
     SV *r;
@@ -975,49 +1049,69 @@ CODE:
     }
 
 UV
-mpn_setior_uint(r, s1, limb_offset = 0, bitlen = 0)
+mpn_setior_uint(r, s1, bitix = 0, bitlen = 0)
     SV *r;
     UV s1;
-    UV limb_offset;
+    UV bitix;
     UV bitlen;
 PREINIT:
-    mp_limb_t *rp;
+mp_limb_t *rp, high, low;
     STRLEN rl;
-    mp_size_t rn, rn1, i;
+mp_size_t rn, rn1, limbix, smallix,top, i;
 CODE:
     ARG(r);
     rn = N(r);
+    limbix = bitix / GMP_NUMB_BITS;
+    smallix = bitix - limbix * GMP_NUMB_BITS;
+    high = s1 >> (GMP_NUMB_BITS - smallix);
+    low = (s1 << smallix) & ~(mp_limb_t)0;
+    top = limbix + (high ? 2 : 1);
     if (bitlen) {
         rn1 = bitlen / GMP_NUMB_BITS;
         if (rn1 * GMP_NUMB_BITS != bitlen)
             Perl_croak(aTHX_ "invalid bit length %d, on this machine a multiple of %d is required",
                        bitlen, GMP_NUMB_BITS);
-        if (limb_offset >= rn1)
-            Perl_croak(aTHX_ "limb_offset out of the range given by bitlen");
+        if (top > rn1)
+            Perl_croak(aTHX_ "bitix is out of the range given bitlen");
     }
     else
-        rn1 = (rn > limb_offset ? rn : limb_offset + 1);
+        rn1 = (rn >= top ? rn : top);
     OUTPUT(r, rn1 * sizeof(mp_limb_t));
     ALIGNED1(r);
     while (rn < rn1) {
         rp[rn++] = 0;
     }
-    rp[limb_offset] |= s1;
-
+    rp[limbix] |= low;
+    if (high)
+        rp[limbix + 1] |= high;
 
 UV
-mpn_get_uint(s1, limb_offset = 0)
+mpn_get_uint(s1, bitix = 0, mask = ~(IV)0)
     SV *s1;
-    UV limb_offset;
+    UV bitix;
+    UV mask;
 PREINIT:
-    mp_limb_t *s1p;
+    mp_limb_t *s1p, high, low;
     STRLEN s1l;
-    mp_size_t s1n;
+    mp_size_t s1n, limbix, smallix;
 CODE:
     ARG(s1);
     ALIGNED1(s1);
     s1n = N(s1);
-    RETVAL = (limb_offset < s1n ? s1p[limb_offset] : 0);
+    limbix = bitix / GMP_NUMB_BITS;
+    smallix = bitix - limbix * GMP_NUMB_BITS;
+    if (limbix < s1n) {
+        low = s1p[limbix];
+        if (limbix + 1 < s1n)
+            high = s1p[limbix + 1];
+        else
+            high = 0;
+    }
+    else {
+        low = 0;
+        high = 0;
+    }
+    RETVAL = ((low >> smallix) | (high << (GMP_NUMB_BITS - smallix))) & mask;
 OUTPUT:
     RETVAL
 
