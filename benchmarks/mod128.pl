@@ -28,7 +28,7 @@ sub FNV_1_128_gmpn {
     for (unpack 'C*', $s) {
         my $h2 = $h;
         mpn_mul($h, $h2, $p);
-        mpn_ior_uint($h, $h, $_);
+        mpn_xor_uint($h, $h, $_);
     }
     return $h;
 }
@@ -38,7 +38,7 @@ sub FNV_1a_128_gmpn {
     mpn_set_str(my $h, '144066263297769815596495629667062367629', 10, 128);
     mpn_set_str(my $p, '309485009821345068724781371', 10, 128 );
     for (unpack 'C*', $s) {
-        mpn_ior_uint($h, $h, $_);
+        mpn_xor_uint($h, $h, $_);
         my $h2 = $h;
         mpn_mul($h, $h2, $p);
     }
@@ -150,6 +150,8 @@ use Data::Dumper;
 
 print Dumper [ uint128_to_hex( FNV_1_128( $text ) ),
                uint128_to_hex( FNV_1a_128( $text ) ),
+               mpn_get_str(FNV_1_128_gmpn( $text ), 16),
+               mpn_get_str(FNV_1a_128_gmpn( $text ), 16),
                Math::GMPz::Rmpz_get_str( FNV_1_128_gmpz( $text ), 16 ),
                Math::GMPz::Rmpz_get_str( FNV_1a_128_gmpz( $text ), 16 ),
                Math::GMPz::Rmpz_get_str( FNV_1_128_gmpz2( $text ), 16 ),
