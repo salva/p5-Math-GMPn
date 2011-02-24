@@ -10,6 +10,13 @@
 #include <gmp.h>
 
 static void
+my_neg(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n) {
+    mp_size_t i;
+    for (i = 0; i < s1n; i++) rp[i] = ~s1p[i];
+    mpn_add_1(rp, rp, s1n, 1);
+}
+
+static void
 my_addmul(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n, mp_limb_t *s2p, mp_size_t s2n) {
     if (s1n && s2n) {
         mp_size_t i = s2n;
@@ -115,8 +122,6 @@ CODE:
 OUTPUT:
     RETVAL
 
-#ifdef mpn_neg
-
 void
 mpn_neg(r, s1)
     SV *r
@@ -124,13 +129,26 @@ mpn_neg(r, s1)
 PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l;
+    mp_size_t s1n, i;
 CODE:
     ARG(s1);
-    ALIGNED1(s1);
-    OUTPUT(r, s1l);
-    mpn_neg(rp, s1p, N(s1));
+    OUTPUT_AND_CHECK(r, s1l, s1);
+    ALIGNED2(r, s1);
+    my_neg(rp, s1p, N(s1));
 
-#endif
+void
+mpn_not(r, s1)
+    SV *r
+    SV *s1
+PREINIT:
+    mp_limb_t *s1p, *rp;
+    STRLEN s1l;
+    mp_size_t i;
+CODE:
+    ARG(s1);
+    OUTPUT_AND_CHECK(r, s1l, s1);
+    ALIGNED2(r, s1);
+    for (i = N(s1); i--;) rp[i] = ~s1p[i];
 
 void
 mpn_add(r, s1, s2)
@@ -372,7 +390,7 @@ CODE:
         OUTPUT_AND_CHECK(r, s2l, s1);
         ALIGNED3(r, s1, s2);
         mpn_sub(rp, s2p, N(s2), s1p, N(s1));
-        mpn_neg_n(rp, rp, N(s2));
+        my_neg(rp, rp, N(s2));
     }
     else {
         OUTPUT_AND_CHECK(r, s1l, s2);
@@ -625,44 +643,70 @@ PREINIT:
     mp_limb_t s1n;
 CODE:
     ARG(s1);
-    OUTPUT(r, s1l);
-    ALIGNED2(r, s1);
     s1n = N(s1);
-    switch (ix) {
-    case 0:
-        rp[0] = s1p[0] | s2;
-        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
-        break;
-    case 1:
-        rp[0] = s1p[0] ^ s2;
-        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
-        break;
-    case 2:
-        rp[0] = s1p[0] & s2;
-        while (--s1n) rp[s1n] = 0;
-        break;
-    case 3:
-        rp[0] = s1p[0] & ~s2;
-        while (--s1n) rp[s1n] = 0;
-        break;
-    case 4:
-        rp[0] = s1p[0] | ~s2;
-        if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
-        break;
-    case 5:
-        rp[0] = ~(s1p[0] & s2);
-        while (--s1n) rp[s1n] = ~(mp_limb_t)0;
-        break;
-    case 6:
-        rp[0] = ~(s1p[0] | s2);
-        while (--s1n) rp[s1n] = ~s1p[s1n];
-        break;
-    case 7:
-        rp[0] = ~(s1p[0] ^ s2);
-        while (--s1n) rp[s1n] = ~s1p[s1n];
-        break;
-    default:
-        Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+    if (s1n) {
+        OUTPUT(r, s1l);
+        ALIGNED2(r, s1);
+        switch (ix) {
+        case 0:
+            rp[0] = s1p[0] | s2;
+            if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+            break;
+        case 1:
+            rp[0] = s1p[0] ^ s2;
+            if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+            break;
+        case 2:
+            rp[0] = s1p[0] & s2;
+            while (--s1n) rp[s1n] = 0;
+            break;
+        case 3:
+            rp[0] = s1p[0] & ~s2;
+            while (--s1n) rp[s1n] = 0;
+            break;
+        case 4:
+            rp[0] = s1p[0] | ~s2;
+            if (r != s1) while (--s1n) rp[s1n] = s1p[s1n];
+            break;
+        case 5:
+            rp[0] = ~(s1p[0] & s2);
+            while (--s1n) rp[s1n] = ~(mp_limb_t)0;
+            break;
+        case 6:
+            rp[0] = ~(s1p[0] | s2);
+            while (--s1n) rp[s1n] = ~s1p[s1n];
+            break;
+        case 7:
+            rp[0] = ~(s1p[0] ^ s2);
+            while (--s1n) rp[s1n] = ~s1p[s1n];
+            break;
+        default:
+            Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+        }
+    }
+    else {
+        OUTPUT(r, sizeof(mp_limb_t));
+        ALIGNED1(r);
+        switch (ix) {
+        case 0:
+        case 1:
+            rp[0] = s2;
+            break;
+        case 2:
+        case 3:
+            rp[0] = 0;
+            break;
+        case 4:
+        case 6:
+        case 7:
+            rp[0] = ~s2;
+            break;
+        case 5:
+            rp[0] = ~(mp_limb_t)0;
+            break;
+        default:
+            Perl_croak(aTHX_ "Internal error: bad ix %d", ix);
+        }
     }
 
 int
@@ -933,7 +977,7 @@ PREINIT:
 CODE:
     if (r == s)
         Perl_croak(aTHX_ "mpn_set_str arguments must not overlap");
-    if (((ix != 0) || (base != 0)) &&
+    if (((ix != 1) || (base != 0)) &&
         ((base < 2) || (base > (ix ? 36 : 256))))
         Perl_croak(aTHX_ "base is out of range");
     if (ix) {
@@ -941,7 +985,7 @@ CODE:
         s = sv_2mortal(newSVsv(s));
         spv = SvPV(s, sl);
         if (base == 0) {
-            if ((rl >= 2) && (spv[0] == '0')) {
+            if ((sl >= 2) && (spv[0] == '0')) {
                 switch (spv[1]) {
                 case 'x':
                     base = 16;
@@ -956,9 +1000,10 @@ CODE:
             }
             if (base) {
                 spv += 2;
-                rl -= 2;
+                sl -= 2;
             }
             else base = 10;
+            fprintf(stderr, "base set to %d\n", (int)base); fflush(stderr);
         }
         for (i = 0; i < sl; i++) {
             char c = spv[i];
@@ -971,7 +1016,7 @@ CODE:
             else
                 Perl_croak(aTHX_ "bad digit, ascii code: %d", c);
             if (spv[i] >= base)
-                Perl_croak(aTHX_ "bad digit, out of range");
+                Perl_croak(aTHX_ "digit out of range, ascii code: %d", c);
         }
     }
     else

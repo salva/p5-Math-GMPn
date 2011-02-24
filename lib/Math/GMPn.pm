@@ -1,6 +1,6 @@
 package Math::GMPn;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use strict;
 use warnings;
@@ -12,6 +12,7 @@ our @EXPORT = qw( GMP_LIMB_BITS
                   GMP_LIMB_BYTES
 
                   mpn_neg
+                  mpn_not
                   mpn_add
                   mpn_sub
                   mpn_mul
@@ -318,6 +319,14 @@ C<$bitix> bits and masked by C<$mask>. Conceptually it is equivalent
 to:
 
   $u = ($s1 >> $bitix ) & $mask;
+
+=item mpn_not($r, $s1)
+
+  $r = ~$s1
+
+=item mpn_neg($r, $s1)
+
+  $r = -$s1
 
 =item mpn_ior($r, $s1, $s2)
 
