@@ -9,6 +9,12 @@
 #include "ppport.h"
 #include <gmp.h>
 
+#ifdef __GNUC__
+#define IFEXPECT(a, b) __builtin_expect(a, b)
+#else
+#define IFEXPECT(a, b) a
+#endif
+
 static void
 my_neg(mp_limb_t *rp, mp_limb_t *s1p, mp_size_t s1n) {
     mp_size_t i;
@@ -81,9 +87,9 @@ my_set_bitlen(pTHX_ SV *sv, int bitlen, int sign_extend) {
     SvCUR_set(sv, len);
 }
 
-#define CHECK_OUTPUT(r) (SvTHINKFIRST(r) ? Perl_croak(aTHX_ "read only scalar used as output argument") : 0)
+#define CHECK_OUTPUT(r) (IFEXPECT(SvTHINKFIRST(r), 0) ? Perl_croak(aTHX_ "read only scalar used as output argument") : 0)
 
-#define ALIGNEDP(spi) (((spi) & (sizeof(mp_limb_t) - 1)) ? Perl_croak(aTHX_ "some argument is unaligned") : 0)
+#define ALIGNEDP(spi) (IFEXPECT(((spi) & (sizeof(mp_limb_t) - 1)), 0) ? Perl_croak(aTHX_ "some argument is unaligned") : 0)
 #define ALIGNED1(a) (ALIGNEDP((IV)a ## p))
 #define ALIGNED2(a, b) (ALIGNEDP(((IV)a ## p) | ((IV)b ## p)))
 #define ALIGNED3(a, b, c) (ALIGNEDP(((IV)a ## p) | ((IV)b ## p) | ((IV)c ## p)))
@@ -98,11 +104,11 @@ static mp_limb_t *prepare_output(pTHX_ SV *r, STRLEN l) {
     return rp;
 }
 
-#define PREPARE_OUTPUT(r, l) ((((SvFLAGS(r) & (SVf_THINKFIRST | SVf_POK)) == SVf_POK) && l == SvCUR(r)) ? (mp_limb_t *)SvPV_nolen(r) : prepare_output(aTHX_ r, l))
+#define PREPARE_OUTPUT(r, l) (IFEXPECT((((SvFLAGS(r) & (SVf_THINKFIRST | SVf_POK)) == SVf_POK) && l == SvCUR(r)),1) ? (mp_limb_t *)SvPV_nolen(r) : prepare_output(aTHX_ r, l))
 
 #define ARG(sv) ((sv ## p = (mp_limb_t*)SvPV_nolen(sv)), (sv ## l = SvCUR(sv)))
 #define OUTPUT(sv, len) (sv ## p = PREPARE_OUTPUT(sv, (len)))
-#define CHECK(r, s) (s ## p = (r == s ? r ## p : s ## p))
+#define CHECK(r, s) (s ## p = (IFEXPECT(r == s, 0) ? r ## p : s ## p))
 #define OUTPUT_AND_CHECK(r, len, s) (OUTPUT(r, len), CHECK(r, s))
 #define N(sv) (sv ## l / sizeof(mp_limb_t))
 
@@ -158,19 +164,26 @@ mpn_add(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l, rl;
+    mp_size_t s1n, s2n;
 CODE:
     ARG(s1);
     ARG(s2);
-    if (s1l < s2l) {
-        OUTPUT_AND_CHECK(r, s2l, s1);
-        ALIGNED3(s1, s2, r);
-        mpn_add(rp, s2p, N(s2), s1p, N(s1));
+    s1n = N(s1);
+    s2n = N(s2);
+    if (IFEXPECT(s1n && s2n, 1)) {
+        if (IFEXPECT(s1n < s2n, 0)) {
+            OUTPUT_AND_CHECK(r, s2l, s1);
+            ALIGNED3(s1, s2, r);
+            mpn_add(rp, s2p, s2n, s1p, s1n);
+        }
+        else {
+            OUTPUT_AND_CHECK(r, s1l, s2);
+            ALIGNED3(r, s1, s2);
+            mpn_add(rp, s1p, s1n, s2p, s2n);
+        }
     }
-    else {
-        OUTPUT_AND_CHECK(r, s1l, s2);
-        ALIGNED3(r, s1, s2);
-        mpn_add(rp, s1p, N(s1), s2p, N(s2));
-    }
+    else
+        sv_setsv(r, (s1n ? s1 : s2));
 
 void
 mpn_add_uint(r, s1, s2)
@@ -180,11 +193,20 @@ mpn_add_uint(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l;
+    mp_size_t s1n;
 CODE:
     ARG(s1);
-    OUTPUT(r, s1l);
-    ALIGNED2(r, s1);
-    mpn_add_1(rp, s1p, N(s1), s2);
+    s1n = N(s1);
+    if (IFEXPECT(s1n != 0, 1)) {
+        OUTPUT(r, s1l);
+        ALIGNED2(r, s1);
+        mpn_add_1(rp, s1p, s1n, s2);
+    }
+    else {
+        OUTPUT(r, sizeof(mp_limb_t));
+        ALIGNED1(r);
+        rp[0] = s2;
+    }
 
 void
 mpn_sub_uint(r, s1, s2)
@@ -194,11 +216,20 @@ mpn_sub_uint(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l;
+    mp_size_t s1n;
 CODE:
     ARG(s1);
-    OUTPUT(r, s1l);
-    ALIGNED2(r, s1);
-    mpn_sub_1(rp, s1p, N(s1), s2);
+    s1n = N(s1);
+    if (IFEXPECT(s1n != 0, 1)) {
+        OUTPUT(r, s1l);
+        ALIGNED2(r, s1);
+        mpn_sub_1(rp, s1p, N(s1), s2);
+    }
+    else {
+        OUTPUT(r, sizeof(mp_limb_t));
+        ALIGNED1(r);
+        rp[0] = -s2;
+    }
 
 UV
 mpn_mod_uint(s1, s2)
@@ -207,10 +238,18 @@ mpn_mod_uint(s1, s2)
 PREINIT:
     mp_limb_t *s1p, *rp;
     STRLEN s1l;
+    mp_size_t s1n;
 CODE:
     ARG(s1);
-    ALIGNED1(s1);
-    RETVAL = mpn_mod_1(s1p, N(s1), s2);
+    s1n = N(s1);
+    if (IFEXPECT(s1n && s2, 1)) {
+        ALIGNED1(s1);
+        RETVAL = mpn_mod_1(s1p, N(s1), s2);
+    }
+    else if (!s2)
+        Perl_croak(aTHX_ "division by zero error");
+    else
+        RETVAL = 0;
 OUTPUT:
     RETVAL
 
@@ -293,7 +332,7 @@ CODE:
     ARG(s2);
     s1n = N(s1);
     s2n = N(s2);
-    if (s1l < s2l) {
+    if (IFEXPECT(s1l < s2l, 0)) {
         OUTPUT_AND_CHECK(r, s2l, s1);
         ALIGNED3(r, s1, s2);
         switch(ix) {
@@ -383,19 +422,34 @@ mpn_sub(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
+    mp_size_t s1n, s2n;
 CODE:
     ARG(s1);
     ARG(s2);
-    if (s1l < s2l) {
-        OUTPUT_AND_CHECK(r, s2l, s1);
-        ALIGNED3(r, s1, s2);
-        mpn_sub(rp, s2p, N(s2), s1p, N(s1));
-        my_neg(rp, rp, N(s2));
+    s1n = N(s1);
+    s2n = N(s2);
+    if (IFEXPECT(s1n && s2n, 1)) {
+        if (IFEXPECT(s1l < s2l, 0)) {
+            OUTPUT_AND_CHECK(r, s2l, s1);
+            ALIGNED3(r, s1, s2);
+            mpn_sub(rp, s2p, s2n, s1p, s1n);
+            my_neg(rp, rp, s2n);
+        }
+        else {
+            OUTPUT_AND_CHECK(r, s1l, s2);
+            ALIGNED3(r, s1, s2);
+            mpn_sub(rp, s1p, s1n, s2p, s2n);
+        }
+    }
+    else if (s2n) {
+        OUTPUT(r, s2l);
+        ALIGNED(r, s2);
+        my_neg(rp, s2p, s2n);
     }
     else {
-        OUTPUT_AND_CHECK(r, s1l, s2);
-        ALIGNED3(r, s1, s2);
-        mpn_sub(rp, s1p, N(s1), s2p, N(s2));
+        OUTPUT(r, s1l);
+        ALIGNED2(r, s1);
+        while (s1n--) rp[s1n] = s1p[s1n];
     }
 
 void
@@ -406,17 +460,26 @@ mpn_mul_ext(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
+    mp_size_t s1n, s2n;
 CODE:
-    if ((r == s1) || (r == s2))
+    if (IFEXPECT((r == s1) || (r == s2), 0))
         Perl_croak(aTHX_ "mpn_emul arguments must not overlap");
     ARG(s1);
     ARG(s2);
+    s1n = N(s1);
+    s2n = N(s2);
     OUTPUT(r, s1l + s2l);
     ALIGNED3(r, s1, s2);
-    if (s1l < s2l)
-        mpn_mul(rp, s2p, N(s2), s1p, N(s1));
-    else 
-        mpn_mul(rp, s1p, N(s1), s2p, N(s2));
+    if (IFEXPECT(s1n && s2n, 1)) {
+        if (IFEXPECT(s1l < s2l, 0))
+            mpn_mul(rp, s2p, s2n, s1p, s1n);
+        else 
+            mpn_mul(rp, s1p, s1n, s2p, s2n);
+    }
+    else {
+        mp_size_t i = s1n + s2n;
+        while (i--) rp[i] = 0;
+    }
 
 void
 mpn_mul(r, s1, s2)
@@ -426,20 +489,31 @@ mpn_mul(r, s1, s2)
 PREINIT:
     mp_limb_t *s1p, *s2p, *rp;
     STRLEN s1l, s2l;
+    mp_size_t s1n, s2n;
 CODE:
-    if ((r == s1) || (r == s2))
+    if (IFEXPECT((r == s1) || (r == s2), 0))
         Perl_croak(aTHX_ "mpn_mul arguments must not overlap");
     ARG(s1);
     ARG(s2);
-    if (s1l < s2l) {
-        OUTPUT(r, s2l);
-        ALIGNED3(r, s1, s2);
-        my_mul(rp, s2p, N(s2), s1p, N(s1));
+    s1n = N(s1);
+    s2n = N(s2);
+    if (IFEXPECT(s1n && s2n, 1)) {
+        if (IFEXPECT(s1n < s2n, 0)) {
+            OUTPUT(r, s2l);
+            ALIGNED3(r, s1, s2);
+            my_mul(rp, s2p, s2n, s1p, s1n);
+        }
+        else {
+            OUTPUT(r, s1l);
+            ALIGNED3(r, s1, s2);
+            my_mul(rp, s1p, s1n, s2p, s2n);
+        }
     }
     else {
-        OUTPUT(r, s1l);
-        ALIGNED3(r, s1, s2);
-        my_mul(rp, s1p, N(s1), s2p, N(s2));
+        mp_size_t i = (s2n > s1n ? s2n : s1n);
+        OUTPUT(r, i * sizeof(mp_limb_t));
+        ALIGNED1(r);
+        while (i--) rp[i] = 0;
     }
  
 void
